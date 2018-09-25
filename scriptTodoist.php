@@ -1,73 +1,43 @@
 <?php
 ini_set('display_errors',1);
+include_once('dao/TaskDao.php');
+include_once('dao/TodoistDao.php');
+include_once('service/MailService.php');
 
-/*** Confs ***/
-$token = "[YOUR_TOKEN]";
-$toProject = '[YOUR_PROJECT]';
-$url = "https://todoist.com/api/v7/quick/add ";
-$tomorrow='dem';
+$taskDao = new TaskDao();
+$todoistDao = new TodoistDao();
+$mailService = new MailService();
 
-/*** Tasks ***/
-$tasks = array (
-    array(
-		"nom" => "A task",
-		"note" => "",
-		"valide" => true,
-		"tempo" => 7,
-		"startDate" => '07-11-2017'
-	),
-	array(
-		"nom" => "Another task",
-		"note" => "with desription",
-		"valide" => true,
-		"tempo" => 15,
-		"startDate" => '19-12-2017'
-	)
-);
+$tasks = $taskDao->findAllValidTasks();
 
-/*** Script ***/
-function addTask($content, $note){
-    global $token, $url,$tomorrow,$toProject;
-	
-	$post_data = [
-		'token' => $token,
-		'text' => $content.' '.$tomorrow.' '.$toProject,
-		'note' => $note
-	];
+foreach ($tasks as $task) {
+    echo 'Tache '.$task['name'].' : ';
 
-	$ch = curl_init();
-	curl_setopt($ch, CURLOPT_URL, $url);
-	curl_setopt($ch, CURLOPT_RETURNTRANSFER, 1);
-	curl_setopt($ch, CURLOPT_POST, 1);
-	curl_setopt($ch, CURLOPT_POSTFIELDS, $post_data);
-	$output = curl_exec($ch);
-	curl_close($ch);
-	
-	return $output;
-}
-
-function isTaskTomorrow($startDate, $tempo){
-	$days = (int)floor((strtotime("tomorrow")- strtotime($startDate) )/ (60 * 60 * 24));
-	$occurence = $days/$tempo;
-	$isTaskTomorrow = is_int($occurence);
-	if($isTaskTomorrow)
-		echo 'Occurrence numero '.$occurence;
-	return $isTaskTomorrow;
-}
-
-foreach ($tasks as $task){
-	if($task['valide']){
-	    echo 'Tache '.$task['nom'].' : ';
-		if(isTaskTomorrow($task['startDate'],$task['tempo'])){
-			$output = addTask($task['nom'], $task['note']);
-			$resArr = array();
-			$resArr = json_decode($output);
-			echo "<pre>"; print_r($resArr); echo "</pre>";
+    $now = date('Y-m-d');
+    if ($task['lastid']==null || $task['date']==null){
+    	$task['date'] = "auj";
+    	newTask($todoistDao, $task, $mailService, $taskDao);
+	} else {
+		$taskTodoist = $todoistDao->getTask($task['lastid']);
+		if ($taskTodoist->item->checked == 1){
+            $task['date'] = date('Y-m-d', strtotime($taskTodoist->date_completed. ' + '.$task['tempo'].' days'));
+            newTask($todoistDao, $task, $mailService, $taskDao);
+            echo "crée pour le ".$task['date'].'<br/>';
 		} else {
-			echo 'Pas demain';
+			echo "en cours <br/>";
 		}
-		echo'<br/>';
 	}
+}
+
+function newTask($todoistDao, $task, $mailService, $taskDao) {
+    $output = $todoistDao->addTask($task);
+    if (!($output === NULL || empty ($output))) {
+        $task['lastid'] = $output->id;
+        $task['date'] = $output->date_added;
+        $taskDao->updateTask($task);
+    } else {
+        $mailService->sendMail("ScriptRecurrentTaskTodoist", "[Todoist] Erreur Api Todoist", "Erreur Api Todoist - Add Task", "");
+    }
 }
 ?>
 
